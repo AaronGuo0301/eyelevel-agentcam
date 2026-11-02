@@ -7,7 +7,58 @@ An embodied vision camera project for AI agents, designed to combine motorized p
 EyeLevel AgentCam 将视觉感知与机械运动结合，让摄像头能够主动调整位置和朝向。项目计划通过人脸与眼部位置跟踪，控制水平云台和垂直升降机构，使镜头尽量保持在人眼高度，为本地 AI Agent 提供可移动的视觉入口。
 
 > **项目状态：早期开发中。**
-> 本文介绍项目目标与拟定方案，不代表相关功能已经完成或通过实机验证。硬件选型、接口和目录结构可能随开发调整。
+> 已提供本地相机人脸检测与调整建议程序；电机控制仍为拟定方案。硬件选型、接口和目录结构可能随开发调整。
+
+## 运行人脸检测与调整建议
+
+Python 3.10+，在项目目录执行（Windows PowerShell）：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe src\agentcam.py
+```
+
+程序持续读取默认相机（编号 0），第一帧处理完成后立即输出，随后每 3 秒输出最新检测结果。图像只在本机内存处理，不保存照片或录像。按 `Ctrl+C` 结束并释放相机。
+
+已有 Conda 环境且安装了 OpenCV 时，可以直接运行 `python src\agentcam.py --preview`。程序兼容 pip 的 `cv2.data.haarcascades` 和 Conda 的 `Library/etc/haarcascades` 等模型目录。不要用 pip 强行覆盖 Conda 管理的 OpenCV；出现 `uninstall-no-record-file` 表示 pip 没有该 Conda 包的卸载记录，并非检测接口不可用。
+
+```text
+[本地时间] 检测到人脸：1 张 | 整体高度：向上升高 | 云台：向左转 | 参考：双眼中点 | 偏差：水平 -20.0%，垂直 -15.0%
+[本地时间] 未检测到人脸 | 整体高度：保持 | 云台：保持 | 无法判断目标方向，不建议盲目左右摇摆
+```
+
+可选参数示例：
+
+```powershell
+# 实时预览：绿色框为选中的人脸，圆点为跟踪参考，黄色框为中心容差
+.\.venv\Scripts\python.exe src\agentcam.py --preview
+# 多个摄像头时手动指定编号；被其他软件占用时请先关闭该软件
+.\.venv\Scripts\python.exe src\agentcam.py --camera 1
+# 运行 12 秒自动退出，或调整中心容差
+.\.venv\Scripts\python.exe src\agentcam.py --duration 12
+.\.venv\Scripts\python.exe src\agentcam.py --deadzone-x 0.08 --deadzone-y 0.06
+# Windows 默认使用 DirectShow；打不开相机时尝试其他后端
+.\.venv\Scripts\python.exe src\agentcam.py --backend msmf
+```
+
+预览窗口按 `Q`、`Esc` 或关闭窗口退出。终端输出中文，预览标注为英文。默认无预览，可用于没有图形界面的环境。Linux/macOS 使用 `.venv/bin/python` 启动；Windows 特有的 `dshow`、`msmf` 后端不适用于这些系统。
+
+调整建议的含义：
+
+- 假定镜头固定水平、图像未镜像也未旋转。目标在画面左侧时云台向左转，在右侧时向右转；双眼高于画面中心时整体升高，低于中心时整体降低。上下移动指升降机构，不是镜头俯仰。
+- 默认容差为中心左右各画面宽度的 8%、上下各画面高度的 6%。两个轴独立判断，可同时建议升降和转向。偏差是整幅画面的比例，水平向右、垂直向下为正。
+- 优先以检测到的双眼中点判断；未检测到双眼时使用人脸框内约 40% 高度处估计眼高，输出会标注“眼高估计”。这属于粗略建议，不是精确眼部关键点定位。
+- 多人时首次选最大人脸，后续优先选择与上一帧框重叠的目标，丢失后重新选择。不识别身份，也不保证多人交叉时保持同一人。
+- 未检测到人脸时保持；这不等于确认画面无人。读取失败时输出“未知”，连续 10 次失败后退出，不沿用旧画面的运动建议。
+- 本版采用 OpenCV 自带的 Haar 人脸/眼部模型，无需另下模型。侧脸、遮挡、逆光、小人脸会影响检测效果。检测方法参考 [OpenCV 官方文档](https://docs.opencv.org/4.11.0/db/d28/tutorial_cascade_classifier.html)。
+- 程序只输出方向，不发送电机指令。未经镜头姿态、视场和距离标定，不能由单帧准确给出升降厘米数或转动角度。输出间隔按单调时钟调度，实际时间受相机读取和检测耗时影响。
+
+如果相机无法打开，检查设备编号、连接、其他相机应用占用，以及 Windows“隐私和安全性 → 相机 → 允许桌面应用访问相机”。预览需要 `opencv-python`，不要在同一个虚拟环境里混装 `opencv-python-headless`。测试命令：
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
 
 ## 项目目标
 
@@ -22,7 +73,8 @@ EyeLevel AgentCam 将视觉感知与机械运动结合，让摄像头能够主�
 
 ## 计划功能
 
-- [ ] 本地 USB 摄像头采集与预览
+- [x] 本地 USB 摄像头采集与预览
+- [x] 每 3 秒输出人脸检测与升降 / 云台方向建议
 - [ ] 人脸检测与眼部关键点定位
 - [ ] 同一目标的连续跟踪
 - [ ] 水平云台角度控制与位置反馈
@@ -99,7 +151,7 @@ flowchart TD
 - USB 串口：电脑与控制硬件之间的通信
 - Git 与 GitHub：版本管理和协作
 
-具体依赖版本、支持的操作系统和启动命令将在首个可运行版本中补充。
+视觉程序的依赖见 `requirements.txt`，安装与启动方式见上文。硬件控制固件尚未实现。
 
 ## 获取项目
 
@@ -108,7 +160,7 @@ git clone https://github.com/AaronGuo0301/eyelevel-agentcam.git
 cd eyelevel-agentcam
 ```
 
-目前尚未提供经过验证的完整安装与启动流程。请以仓库实际代码、后续文档和发布说明为准。
+当前可以运行上文的视觉建议程序；完整机械控制和标定流程仍待实现与验证。
 
 ## 开发路线
 
