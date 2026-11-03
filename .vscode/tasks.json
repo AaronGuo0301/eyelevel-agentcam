@@ -1,0 +1,58 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Arduino: Setup tools",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/setup_arduino.ps1"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": []
+    },
+    {
+      "label": "Arduino: List ports",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-arduino/Scripts/python.exe",
+      "args": ["src/arduino_control.py", "--list"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": []
+    },
+    {
+      "label": "Arduino: Build",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-arduino/Scripts/python.exe",
+      "args": ["-m", "platformio", "run", "-e", "uno"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Arduino: Upload",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-arduino/Scripts/python.exe",
+      "args": ["-m", "platformio", "run", "-e", "uno", "-t", "upload", "--upload-port", "${input:arduinoPort}"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Arduino: Verify connection and LED",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-arduino/Scripts/python.exe",
+      "args": ["src/arduino_control.py", "--port", "${input:arduinoPort}", "--smoke-test"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": []
+    },
+    {
+      "label": "Arduino: Control motor and LED",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv-arduino/Scripts/python.exe",
+      "args": ["src/arduino_control.py", "--port", "${input:arduinoPort}", "--interactive"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "presentation": {"reveal": "always", "focus": true},
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {"id": "arduinoPort", "type": "promptString", "description": "Arduino port from List ports (for example COM3)", "default": "COM3"}
+  ]
+}

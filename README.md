@@ -60,6 +60,82 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
+## 在 VS Code 中识别和控制 Arduino UNO R3
+
+使用 USB-B 数据线连接 UNO 和 PC。可以先用板载 `L` 灯验证通信，无需接电机或额外的 12V 电源。固件还支持 28BYJ-48 + ULN2003 的手动点动，尚未接入相机自动跟随。
+
+在 VS Code 中打开本项目文件夹，按 `Ctrl+Shift+P`，选择 **Tasks: Run Task（任务：运行任务）**，按顺序执行：
+
+| 任务 | 作用 |
+| --- | --- |
+| `Arduino: Setup tools` | 首次安装工具到项目 `.venv-arduino`，不修改当前 Conda 环境 |
+| `Arduino: List ports` | 显示串口、USB VID/PID 等信息，不打开串口 |
+| `Arduino: Build` | 编译 UNO 固件，首次需联网下载 AVR 工具链 |
+| `Arduino: Upload` | 输入确认后的串口编号，编译并将测试固件写入 UNO，替换板上原程序 |
+| `Arduino: Verify connection and LED` | 握手、开灯 1 秒、检查状态、关灯，输出 `PASS` |
+| `Arduino: Control motor and LED` | 交互控制电机和灯；`q` 停止并释放电机、关灯、退出 |
+
+当前机器检测到的 UNO USB ID 为 `2341:0043`，端口为 `COM3`。换 USB 接口或换电脑后编号可能改变，应重新运行 List ports；可拔插 USB 比较端口列表。设备名称可能仅为“USB 串行设备”，不一定显示 Arduino。COM5/COM6 等蓝牙端口不是该 UNO。
+
+这些任务使用项目内的 PlatformIO Core，不要求安装 Arduino IDE 或 VS Code 扩展。需要 C++ 智能提示、PlatformIO 图形界面时，可另装官方 **PlatformIO IDE** 扩展并打开同一项目。配置见 `platformio.ini`，固件见 `firmware/uno_serial/src/main.cpp`。
+
+也可以直接在 VS Code 的 PowerShell 终端执行：
+
+```powershell
+# 首次安装工具
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup_arduino.ps1
+# 查看设备
+.\.venv-arduino\Scripts\python.exe src\arduino_control.py --list
+# 编译并上传（将 COM3 换成实际端口）
+.\.venv-arduino\Scripts\python.exe -m platformio run -e uno -t upload --upload-port COM3
+# 验证通信和板载灯
+.\.venv-arduino\Scripts\python.exe src\arduino_control.py --port COM3 --smoke-test
+# 交互控制
+.\.venv-arduino\Scripts\python.exe src\arduino_control.py --port COM3
+```
+
+正常握手会返回 `PONG AGENTCAM UNO 2`。波特率为 115200，命令使用 ASCII，以换行结束。固件接受 `PING`、`LED ON`、`LED OFF`、`STATUS`、`MOVE N`、`STOP`、`MOTOR STATUS`，其他命令会返回错误。PC 脚本只在握手确认本项目固件之后发送控制指令。原来的版本 1 固件需要重新上传。
+
+打开串口通常会使 UNO 复位，因此脚本等待 2 秒；交互模式会保持同一次连接，适合观察灯的连续变化。单条命令可用 `--command on` / `off` / `status` / `ping`，但下一次运行重新打开串口可能复位并清除上一轮的 LED 状态。
+
+如果提示串口被占用，先退出控制脚本、关闭 Arduino/PlatformIO 串口监视器再上传；上传和控制不能同时占用同一端口。若没有 USB 串口，检查数据线，在 Windows 设备管理器查看“端口 (COM 和 LPT)”及未知设备；兼容板的驱动类型以实际 USB 芯片/硬件 ID 为准。
+
+参考：[PlatformIO 项目配置](https://docs.platformio.org/en/stable/projectconf/index.html)、[指定上传端口](https://docs.platformio.org/en/stable/projectconf/sections/env/options/upload/upload_port.html)。
+
+### 28BYJ-48 电机点动
+
+控制接线固定为 **IN1→D8、IN2→D9、IN3→D10、IN4→D11**，驱动板 GND 与 UNO GND 共地。电机由匹配额定电压的外接电源供电，UNO 使用 USB 供电。驱动板电源端和跳线应按具体板型说明连接，不应仅凭线色判断正负极。
+
+先运行 `Arduino: Upload` 上传当前固件，再运行 `Arduino: Control motor and LED`，输入端口（本机此前是 COM3）。终端命令如下：
+
+| 输入 | 行为 |
+| --- | --- |
+| `cw` | 正向点动 128 个半步，约 0.5 秒 |
+| `ccw` | 反向点动 128 个半步，约 0.5 秒 |
+| `move 512` | 正向点动 512 个半步，约 2 秒 |
+| `move -512` | 反向点动 512 个半步，约 2 秒 |
+| `stop` | 停止并释放线圈 |
+| `motor` | 查询软件运动状态和剩余半步数 |
+| `q` | 停止、释放线圈、关闭 L 灯并退出 |
+
+`cw`/`ccw` 是正反向命令别名，实际观察到的顺逆时针与观察轴端、接线有关。每次运动仅接受 -512～512 的非零整数半步数；以约 4096 半步/圈估算，128 半步约 11°、512 半步约 45°，不是经过标定的角度。忙时拒绝新运动，不排队；可先输入 `stop`。固件每 4ms 换相，采用非阻塞八拍半步序列，启动时所有控制输出为低。
+
+每次动作完成后自动释放线圈，固件还有 3 秒动作上限。停止命令在同一串口连接内发送；PC 进程异常退出或 USB 断开不会被立即感知，但不会持续无限运动。若需要立即切断电机动力，应断开其外接电源。
+
+这是空载台架点动程序，没有回零、限位、编码器或抱闸控制，释放线圈后不保持负载位置，不用于承重升降。`OK MOVE N` 仅表示固件接受了指令，`MOTOR IDLE 0` 表示软件完成或停止，均不证明电机实际转过指定角度。自动 LED 验证不会驱动电机。
+
+直接使用终端时，启动交互控制：
+
+```powershell
+.\.venv-arduino\Scripts\python.exe src\arduino_control.py --port COM3
+```
+
+也可以运行一次有界动作，脚本会等动作结束并发送停止后退出：
+
+```powershell
+.\.venv-arduino\Scripts\python.exe src\arduino_control.py --port COM3 --command "move 128"
+```
+
 ## 项目目标
 
 传统固定摄像头难以适应用户坐下、站起或左右移动时的位置变化。EyeLevel AgentCam 希望通过两个运动自由度改善这一问题：
